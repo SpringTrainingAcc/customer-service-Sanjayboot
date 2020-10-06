@@ -1,75 +1,119 @@
+def args = [:]
+args.CLUSTER_NAME = "https://172.30.0.1:443"
+args.PROJECT_NAME = "oc-springtraining"
+args.SERVICE_NAME = "customer-service-Sanjayboot"
+args.SERVICE_VERSION = "0.0.1-SNAPSHOT"
+
 pipeline {
-    node () {
-        stage ('Code Checkout')
-        {
-            checkout changelog: false, poll: false, scm: [$class: 'GitSCM', branches: [[name: '*/master']], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[url: 'https://github.com/kumarutpalarch/customer-mservice']]]
+    agent any
+        options {
+            disableConcurrentBuilds()
+            buildDiscarder(logRotator(numToKeepStr: '5'))
         }
-        stage ('Build')
-        {
-            echo "Checkout completed. Starting the build"
-            withMaven(maven: 'maven-latest') {
-                sh 'mvn clean install package'
-                stash name:"jar", includes:"target/customer-service-*.jar"
-            }
-        }
-        stage('unit tests') {
-            withMaven(maven: 'maven-latest') {
-                sh 'mvn test'   
-            }
-        }
-        stage('Create Image Builder') {
-            if (
-                expression {
-                openshift.withCluster() {
-                  openshift.withProject() {
-                      return !openshift.selector("bc", "customer-service").exists()
-                      }
-                     }
-                    }
-                )
-                script {
-                    openshift.withCluster() {
-                        openshift.withProject() {
-                            openshift.newApp "registry.access.redhat.com/redhat-openjdk-18/openjdk18-openshift~/var/lib/jenkins/jobs/customer-service-pipeline-test/workspace", "--name=customer-service"
+        stages {
+            stage('Preamble') {
+                steps {
+                    script {
+                        openshift.withCluster() {
+                            openshift.withProject() {
+                                echo "Using Project: ${openshift.project()}"
+                                echo "Using Cluster: ${openshift.cluster()}"
+                            }
                         }
                     }
                 }
             }
-        stage('Build Image') {
-              script {
-                openshift.withCluster() {
-                  openshift.withProject() {
-                      def build = openshift.selector("bc", "customer-service");
-                      def startedBuild = build.startBuild("--from-file=\"./target/customer-service-0.0.1-SNAPSHOT.jar\"");
-                      startedBuild.logs('-f');
-                      echo "Customer service build status: ${startedBuild.object().status}";
-                  }
+            stage ('Code Checkout') {
+                steps {
+                    script {
+                        checkout scm
+                    }
                 }
-              }
-          }
-        stage('Tag Image') {
-            script {
-                openshift.withCluster() {
-                    openshift.withProject() {
-                        openshift.tag("customer-service"+":latest", "customer-service"+":dev")
+            }
+            stage ('Build') {
+                steps {
+                    script {
+                        echo "Checkout completed. Starting the build"
+                        withMaven(maven: 'maven-latest') {
+                            sh 'mvn clean install package'
+                            //stash name:"jar", includes:"target/customer-service-*.jar"
+                        }
+                    }
+                }
+            }
+            stage('unit tests') {
+                steps {
+                    script {
+                        withMaven(maven: 'maven-latest') {
+                        sh 'mvn test'   
+                        }
+                    }
+                }   
+            }
+            stage('Create Image Builder') {
+                when {
+                    expression {
+                        openshift.withCluster(args.CLUSTER_NAME) {
+                            openshift.withProject(args.PROJECT_NAME) {
+                                return !openshift.selector("bc", "${args.SERVICE_NAME}").exists()
+                            }
+                        }
+                    }
+                }
+                steps {
+                    script {
+                        openshift.withCluster(args.CLUSTER_NAME) {
+                            openshift.withProject(args.PROJECT_NAME) {
+                                openshift.newApp "registry.access.redhat.com/redhat-openjdk-18/openjdk18-openshift~./", "--name=${args.SERVICE_NAME}"
+                                //openshift.newBuild("--name=${args.SERVICE_NAME}", "--image-stream=redhat-openjdk18-openshift:latest", "--binary=true")
+                            }
+                        }
+                    }
+                }               
+            }
+            stage('Build Image') {
+                steps {
+                    script {
+                        openshift.withCluster(args.CLUSTER_NAME) {
+                            openshift.withProject(args.PROJECT_NAME) {
+                                def build = openshift.selector("bc", "${args.SERVICE_NAME}");
+                                def startedBuild = build.startBuild("--from-file=\"./target/${args.SERVICE_NAME}-${args.SERVICE_VERSION}.jar\"");
+                                startedBuild.logs('-f');
+                                echo "Customer service build status: ${startedBuild.object().status}";
+                            }
+                        }
+                    }
+                }
+            }
+            stage('Tag Image') {
+                steps {
+                    script {
+                        openshift.withCluster(args.CLUSTER_NAME) {
+                            openshift.withProject(args.PROJECT_NAME) {
+                                openshift.tag("${args.SERVICE_NAME}"+":latest", "${args.SERVICE_NAME}"+":dev")
+                            }
+                        }
+                    }
+                }
+            }
+            stage('Deploy STAGE') {
+                steps {
+                    script {
+                        openshift.withCluster(args.CLUSTER_NAME) {
+                            openshift.withProject(args.PROJECT_NAME) {
+                                if (openshift.selector('dc', "${args.SERVICE_NAME}").exists()) {
+                                    openshift.selector('dc', "${args.SERVICE_NAME}").delete()
+                                    openshift.selector('svc', "${args.SERVICE_NAME}").delete()
+                                    //openshift.selector('route', "${args.SERVICE_NAME}").delete()
+                                }
+                                if (openshift.selector('route', "${args.SERVICE_NAME}").exists()) {
+                                    openshift.selector('route', "${args.SERVICE_NAME}").delete()
+                                }
+                                openshift.newApp("${args.SERVICE_NAME}").narrow("svc").expose()
+                            }
+                        }
                     }
                 }
             }
         }
-        stage('Deploy') {
-              script {
-                openshift.withCluster() {
-                  openshift.withProject() {
-                    if (openshift.selector('dc', 'customer-service').exists()) {
-                      openshift.selector('dc', 'customer-service').delete()
-                      openshift.selector('svc', 'customer-service').delete()
-                      //openshift.selector('route', 'customer-service').delete()
-                    }
-
-                    openshift.newApp("customer-service").narrow("svc").expose()
-                    }
-              }
-            }
-          }
-    }
 }
