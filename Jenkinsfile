@@ -1,7 +1,7 @@
 def args = [:]
 args.CLUSTER_NAME = "https://172.30.0.1:443"
 args.PROJECT_NAME = "oc-springtraining"
-args.SERVICE_NAME = "customer-service-Sanjayboot"
+args.SERVICE_NAME = "customer-service-sanjayboot"
 args.SERVICE_VERSION = "0.0.1-SNAPSHOT"
 
 pipeline {
