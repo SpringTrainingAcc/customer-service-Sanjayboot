@@ -33,7 +33,7 @@ public class CustomerController {
 		return list;
 	}
 
-	// URL - http://localhost:8080/customer/{cusId}
+	// TEST URL - http://localhost:8080/customer/{cusId}
 	@RequestMapping(value = "/customer/{cusId}", method = RequestMethod.GET, produces = { MediaType.APPLICATION_JSON_VALUE })
 	public Customer getCustomer(@PathVariable("cusId") String cusId) {
 		return customerDAO.getCustomer(cusId);
